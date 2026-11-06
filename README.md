@@ -9,6 +9,12 @@ Works on both macOS and Windows, which support WebDAV natively.
 > [!Important]
 > For Windows User, read the [Platform Notes](#platform-notes)
 
+> [!IMPORTANT]
+> This is a **Nuxeo Presales Sandbox plugin**, not included as part of the Nuxeo Platform and, so,
+> it is **not supported**.
+> If you need the feature, **we strongly recommend a Nuxeo Partner forks the code and takes ownership**
+> (tuning, maintenance, support)
+
 ## How it works
 
 The plugin provides its **own WebDAV endpoint**, at `/nuxeo/site/officeedit`. It does not use, and does
