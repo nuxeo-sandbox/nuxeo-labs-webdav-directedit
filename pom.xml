@@ -9,7 +9,7 @@
 
   <groupId>nuxeo.labs.webdavdirectedit</groupId>
   <artifactId>nuxeo-labs-webdav-directedit-parent</artifactId>
-  <version>2025.1.0-SNAPSHOT</version>
+  <version>2025.2.0-SNAPSHOT</version>
   <name>Nuxeo Labs WebDAV Direct Edit</name>
   <description>Open a Nuxeo Office document directly in Word, Excel or PowerPoint over WebDAV</description>
   <packaging>pom</packaging>
