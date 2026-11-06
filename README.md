@@ -6,6 +6,9 @@ the changes go straight back to Nuxeo and update the document.
 
 Works on both macOS and Windows, which support WebDAV natively.
 
+> [!Important]
+> For Windows User, read the [Platform Notes](#platform-notes)
+
 ## How it works
 
 The plugin provides its **own WebDAV endpoint**, at `/nuxeo/site/officeedit`. It does not use, and does
@@ -452,12 +455,21 @@ When `available` is `false`, `reason` is one of `disabled`, `noBlob`, `notMainBl
 
 ## Build
 
+
+### Local Build
+After cloning the repo:
+
 ```bash
+cd /path/to/nuxeo-labs-webdav-directedit
 mvn clean install
 ```
 
 The marketplace package is produced at
 `nuxeo-labs-webdav-directedit-package/target/nuxeo-labs-webdav-directedit-package-<version>.zip`.
+
+### Nuxeo marketplace
+
+The package is available in Nuxeo Marketplace. So, for example, you can just add `nuxeo-labs-webdav-directedit` to your Sutdio dependencies, or in the `NUXEO_PACKAGES` variable of a Docker deployment.
 
 ## Support
 
