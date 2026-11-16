@@ -52,8 +52,9 @@ import org.nuxeo.runtime.api.Framework;
  * <b>No client has yet been observed writing here</b> — see "What a real Office client actually does" in
  * {@code AGENTS.md}. Both Word for Mac and Word for Windows send a plain {@code PUT} on the canonical name through
  * the {@code ms-word:} protocol handler. The path is kept because unobserved is not unreachable: opening the address
- * with File then Open, or from a mapped drive, routes Windows through the WebClient service, and Excel, PowerPoint
- * and older Office versions are untested.
+ * with File then Open, or from a mapped drive, routes Windows through the WebClient service, the request sequence of
+ * Excel and PowerPoint was not traced (they open and save, by an unknown path), and older Office versions are
+ * untested.
  *
  * @since 2025.1
  */

@@ -214,8 +214,8 @@ Measured clients send a plain `PUT` on the canonical name. The other shape, impl
 | `DELETE tmp2.tmp` | drop the scratch entry |
 
 **Unobserved is not unreachable — do not delete it.** Likely routes: File › Open or a mapped drive (Windows WebClient
-turns filesystem renames into `MOVE`s — and the dialog's `urlHint` advertises this route), Excel/PowerPoint, older
-Office, Finder/Explorer mounts. `noteTransactedSave` logs one INFO line, once per server lifetime, the first time any
+turns filesystem renames into `MOVE`s — and the dialog's `urlHint` advertises this route), Excel/PowerPoint (they
+work, but their save sequence was not traced), older Office, Finder/Explorer mounts. `noteTransactedSave` logs one INFO line, once per server lifetime, the first time any
 client takes it: that is the field measurement that may one day justify retiring it.
 
 ## What a real Office client actually does
@@ -232,8 +232,11 @@ contradict it.
 - macOS only: a second writer is refused (`LockSecurityPolicy`); **one version per editing session**, not per save;
   file names with spaces round-trip through `DavTarget.encode`/`decode`; **reopening from recent files works**
   (that is what the two lifetimes are for).
-- Unverified: Excel, PowerPoint, older Office, Windows over HTTPS, a large document, the Basic fallback with a real
-  client, File › Open. `README.md` "Validation status" holds the user-facing tables — keep both in sync.
+- Excel (`.xlsx`) and PowerPoint (`.pptx`): open, edit and save through the button work (16/11/2026), but the run was
+  not traced, so which save path they take is unknown.
+- Unverified: the Excel/PowerPoint request sequence, Excel's 216-char cap with a long name, older Office, Windows over
+  HTTPS, a large document, the Basic fallback with a real client, File › Open. `README.md` "Validation status" holds
+  the user-facing tables — keep both in sync.
 
 ## A new address per click
 
@@ -248,6 +251,9 @@ all three and give revocation its index — not implemented. If added, keep `iss
 - One INFO line per server lifetime from `noteTransactedSave` (a measurement instrument, see above).
 - One DEBUG line per request at the top of `service()` — the only record of which verbs a client sends (no Tomcat
   access log by default).
+- **None of these show with the stock `log4j2.xml`**: Root is `warn` and `nuxeo.labs.webdav.directedit` has no entry
+  (it is not under `org.nuxeo`, itself `warn` anyway). The README ("Reading the log") gives the `<Logger>` line to
+  add. Documented on purpose rather than promoted to WARN: a successful save is not a warning.
 
 ## Conventions
 

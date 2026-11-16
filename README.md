@@ -375,21 +375,28 @@ returns `403` rather than the document.
 
 ### Reading the log
 
-One `INFO` line is written per save, so a working installation is visible without any configuration:
+The plugin writes one `INFO` line per save:
 
 ```
 INFO  [OfficeEditServlet] Office edit: updated main blob of document 1a2b3c4d-… (Report.docx, 24576 bytes)
 ```
 
-For anything finer, raise this plugin's own logger to `DEBUG`. Add one line inside `<Loggers>` in
-`log4j2.xml`; it covers every class in the plugin, and nothing else:
+**It is not visible with the default logging configuration.** Nuxeo's stock `log4j2.xml` logs at `WARN`
+by default, and the plugin's logger, `nuxeo.labs.webdav.directedit`, has no entry of its own. To see
+it, add one line inside `<Loggers>` in `$NUXEO_HOME/lib/log4j2.xml`; it covers every class in the
+plugin, and nothing else:
 
 ```xml
-<Logger name="nuxeo.labs.webdav.directedit" level="debug" />
+<Logger name="nuxeo.labs.webdav.directedit" level="info" />
 ```
 
-You then get one line per HTTP request, with the method and the path, plus a line per authentication.
-Session tokens are masked everywhere, so a DEBUG log is safe to paste into a ticket.
+The file is declared with `monitorInterval="30"`, so the change is picked up within 30 seconds, without
+a restart. Where `log4j2.xml` comes from a configuration template, as in the Docker image, make the
+change in that template: a regenerated configuration would otherwise overwrite it.
+
+For anything finer, use `level="debug"` instead. You then get one line per HTTP request, with the
+method and the path, plus a line per authentication. Session tokens are masked everywhere, so a DEBUG
+log is safe to paste into a ticket.
 
 Two things are worth watching:
 
@@ -405,11 +412,11 @@ reverse proxy.
 ## Validation status
 
 Honest reporting of what has actually been exercised against real Office clients, as opposed to the
-automated test suite. Measured on 22 September 2026, through the `ms-word:` protocol handler — that is,
-by clicking the button. Windows was measured over plain HTTP on a local server, macOS over **HTTPS on a
-hosted instance**.
+automated test suite. Word was measured on 22 September 2026, through the `ms-word:` protocol handler —
+that is, by clicking the button. Windows was measured over plain HTTP on a local server, macOS over
+**HTTPS on a hosted instance**. Excel and PowerPoint have their own section below.
 
-The two clients do not behave identically, so they are reported separately.
+The two Word clients do not behave identically, so they are reported in separate columns.
 
 | | macOS, Word | Windows, Word |
 |---|---|---|
@@ -437,13 +444,20 @@ Measured once, on macOS:
 - the upload cap, the scratch permission check, the absolute session ceiling and the base URL taken
   from the request — the whole security hardening — ran against a real client without regression.
 
-**Not yet verified:**
+### Excel and PowerPoint
+
+On 16 November 2026, a Word (`.docx`), an Excel (`.xlsx`) and a PowerPoint (`.pptx`) document were each
+opened with the button, edited and saved back to Nuxeo successfully. That run did not trace the
+requests, so how Excel and PowerPoint save, with a direct `PUT` or with the transacted save described
+below, is not known yet.
+
+### Not yet verified
 
 - **opening the address with File then Open**, or from a mapped drive, rather than with the button.
   On Windows that route goes through the WebClient service, which is likely to produce a different
   request sequence — see below. The dialog advertises this route, so it matters;
-- Excel and PowerPoint. Microsoft's applications demonstrably differ: the 216-character URI limit is
-  specific to Excel;
+- the request sequence Excel and PowerPoint send, and the 216-character URI limit specific to Excel,
+  with a long file name;
 - older Office versions;
 - the credentials-prompt fallback against a real Office client, once the authentication window has
   lapsed — covered by automated tests only;
@@ -457,12 +471,13 @@ Word is documented, and widely reported, to save by writing a temporary file, re
 aside, renaming the temporary into place and deleting the leftover. The plugin implements that
 sequence, and the automated test suite exercises it.
 
-**Neither client measured here does it.** Both send a plain `PUT`. That does not make the code dead:
-the protocol handler is only one way in, and the routes listed above as unverified are precisely the
-ones most likely to use it. **Unobserved is not unreachable.**
+**Neither Word client measured here does it.** Both send a plain `PUT`. That does not make the code
+dead: the protocol handler is only one way in, and the routes listed above as unverified are precisely
+the ones most likely to use it. **Unobserved is not unreachable.**
 
 Rather than keep guessing, the plugin reports it. The first time any client takes that path, on any
-deployment, one line appears in the log:
+deployment, one line appears in the log, provided the plugin's logger is at `INFO`, see
+[Reading the log](#reading-the-log):
 
 ```
 INFO  Office edit: a client used the transacted save path (MOVE on Report.docx). ...

@@ -559,7 +559,8 @@ public class OfficeEditServlet extends HttpServlet {
      * This exists to settle a question measurement has not: through the {@code ms-word:} protocol handler, both Word
      * for Mac and Word for Windows send a direct {@code PUT}. But the address can also be opened with File then Open,
      * or from a mapped drive, and on Windows that route goes through the WebClient service, which turns Word's
-     * ordinary filesystem save into {@code MOVE}s. Excel, PowerPoint and older Office versions are untested too.
+     * ordinary filesystem save into {@code MOVE}s. Excel and PowerPoint open and save, but their request sequence
+     * was not traced, and older Office versions are untested.
      * <p>
      * So the path is unobserved, not unreachable. One INFO line in a customer's log answers definitively what no
      * amount of local testing could.
