@@ -571,6 +571,28 @@ rather than assigning `window.location`, which raises a navigation error when Of
 Also render it as a real link the user can click as a fallback. A desktop application hands the URI to
 the operating system.
 
+**Testing from a terminal.** To check the server side before any UI exists, open `protocolUrl` from a
+shell. Quote it: an unquoted `|` is a pipe, so the shell runs `ms-word:ofe` on its own and then fails
+with `u: command not found`, and Office never gets the address.
+
+```bash
+# macOS
+open 'ms-word:ofe|u|https://nuxeo.example.com/nuxeo/site/officeedit/<token>/Report.docx'
+```
+
+```bat
+:: Windows, cmd.exe (the empty "" is the window title start expects)
+start "" "ms-word:ofe|u|https://nuxeo.example.com/nuxeo/site/officeedit/<token>/Report.docx"
+```
+
+```powershell
+# Windows, PowerShell
+Start-Process 'ms-word:ofe|u|https://nuxeo.example.com/nuxeo/site/officeedit/<token>/Report.docx'
+```
+
+The command line ends up in the shell history with the address in it: test with a throwaway document
+or user rather than a real account.
+
 ### Authentication
 
 There are two separate legs:
