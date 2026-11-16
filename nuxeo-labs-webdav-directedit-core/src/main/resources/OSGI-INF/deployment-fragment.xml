@@ -1,7 +1,18 @@
 <?xml version="1.0"?>
 <fragment version="1">
 
-  <require>org.nuxeo.web.ui</require>
+  <!--
+    "all" is a marker the deployment preprocessor registers after every other fragment
+    (FragmentRegistry.commitFragments), so this install step runs after every fragment that does not itself
+    require "all". That matters for the i18n appends below: the Web UI fragment unzips messages.json and
+    copies messages-fr.json over the fr-FR and fr-CA files, which would wipe our keys if it ran after us.
+
+    Do NOT require org.nuxeo.web.ui instead. Web UI is optional: the WebDAV endpoint and the Automation
+    operations work without it, for instance behind a custom UI. A fragment requiring a bundle that is not
+    deployed is never preprocessed, so the servlet below would not be mounted, with nothing but a
+    "Bundle not preprocessed" ERROR at startup. TestDeploymentFragment pins this.
+  -->
+  <require>all</require>
 
   <!--
     Mount the WebDAV endpoint Microsoft Office talks to.
@@ -38,8 +49,9 @@
 
     <!--
       Append the translations to the existing Web UI ones. AppendCommand merges JSON with Jackson when the
-      destination already exists, which it does: the web-ui addon fragment copies messages-fr.json to the
-      four-letter locales. The require above guarantees we run after it.
+      destination already exists, which it does when Web UI is installed: the web-ui addon fragment copies
+      messages-fr.json to the four-letter locales. Requiring "all" above guarantees we run after it. Without
+      Web UI these files are created holding only our keys, and nothing loads them.
     -->
     <append from="${bundle.fileName}.tmp/web/nuxeo.war/ui/i18n/messages.json" to="nuxeo.war/ui/i18n/messages.json" addNewLine="true"/>
     <append from="${bundle.fileName}.tmp/web/nuxeo.war/ui/i18n/messages-fr.json" to="nuxeo.war/ui/i18n/messages-fr.json" addNewLine="true"/>

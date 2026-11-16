@@ -6,6 +6,9 @@ the changes go straight back to Nuxeo and update the document.
 
 Works on both macOS and Windows, which support WebDAV natively.
 
+Web UI is optional: the endpoint and the Automation operations work the same behind a custom UI, see
+[Without Web UI (custom UI)](#without-web-ui-custom-ui).
+
 > [!Important]
 > For Windows User, read the [Platform Notes](#platform-notes)
 
@@ -68,8 +71,8 @@ Everything else follows from that rule:
 | | |
 |---|---|
 | Nuxeo | LTS 2025, 2025.24 or later |
-| Addons | `nuxeo-web-ui` |
-| Client | Microsoft Word, Excel or PowerPoint installed on the user's desktop |
+| Addons | None. `nuxeo-web-ui` for the button |
+| Client | Microsoft Word, Excel or PowerPoint **desktop** application, licensed for editing, on Windows or macOS. See [Client requirements](#client-requirements) |
 | Transport | **HTTPS strongly recommended**, see Platform notes below |
 
 ## Installation
@@ -77,6 +80,60 @@ Everything else follows from that rule:
 ```bash
 nuxeoctl mp-install nuxeo-labs-webdav-directedit-package-<version>.zip
 ```
+
+## Client requirements
+
+Nothing has to be installed on the user's computer besides Microsoft Office: no Nuxeo Drive, no agent,
+no browser extension, no Java, no mapped drive, and no administrator rights. A browser launches Office
+from the button; a custom UI can launch it by other means, see
+[Without Web UI (custom UI)](#without-web-ui-custom-ui).
+
+The computer must still meet the following conditions.
+
+1. **A licensed Office desktop application that can edit.**
+   - Word, Excel or PowerPoint desktop: Microsoft 365 Apps, or a perpetual Office 2016 or later. Older
+     versions are untested.
+   - Office must be activated. An unlicensed Office runs in *reduced functionality mode*, which opens
+     documents read-only.
+   - Some Microsoft 365 plans, such as Business Basic, E1 or F3, include Office for the web and mobile
+     only, with no desktop application. They cannot be used.
+2. **Windows or macOS.** Linux and ChromeOS have no Office desktop application. Office for the web, iOS
+   and Android are untested and not expected to work.
+3. **Direct network access to Nuxeo.** Office connects to the address built from
+   `nuxeo.labs.webdavDirectEdit.baseUrl`, else `nuxeo.url`, not to the UI the user clicked in. DNS, VPN
+   and firewalls must allow it.
+   - Office uses the operating system's proxy settings. A proxy configured only in a browser, such as
+     Firefox, does not apply.
+   - A corporate proxy must let the WebDAV methods through (`PROPFIND`, `LOCK`, `UNLOCK`, …), see
+     [Deployment](#deployment).
+4. **An HTTPS certificate the operating system trusts.** Office checks it against the Windows certificate
+   store or the macOS Keychain.
+   - Accepting a certificate warning in the browser does nothing for Office.
+   - Firefox has its own certificate store, so a server that works in Firefox may still fail in Office.
+   - A self-signed certificate, common on demonstration servers, must be added to the system store.
+   - Behind a TLS-inspecting proxy, the corporate root certificate must be in the system store. It
+     usually is on managed computers.
+5. **A browser allowed to launch Office.** By default the browser asks for confirmation (*Open Microsoft
+   Word?*). A browser policy can block external protocols altogether or, on the contrary, skip the prompt
+   for the Nuxeo host (`AutoLaunchProtocolsFromOrigins` in Chrome and Edge).
+
+### On Windows
+
+- **Put the Nuxeo host in the *Trusted sites* or *Local intranet* zone.** This removes both the launch
+  prompt and Protected View, see
+  [The fix: put the Nuxeo host in a trusted zone](#the-fix-put-the-nuxeo-host-in-a-trusted-zone).
+- **Macros.** Since 2022, Office blocks VBA macros in files that come from the Internet zone. A
+  macro-enabled document (`.docm`, `.xlsm`, `.pptm`) served by a host in that zone is expected to open
+  with its macros blocked, and the zone change above to lift that. Not verified.
+- **Plain HTTP** works only while the address authenticates on its own. Once Office prompts for
+  credentials, Windows refuses to send them over HTTP, see
+  [Basic credentials over plain HTTP](#basic-credentials-over-plain-http). Use HTTPS in production;
+  plain HTTP is fine for a demonstration, see
+  [Demonstration machine over HTTP](#demonstration-machine-over-http).
+- **The WebClient service is not involved** when the button is used: Office talks to the server with its
+  own HTTP client. Opening the address with *File › Open* or from a mapped drive does go through
+  WebClient, which by default also refuses to download files larger than about 50 MB
+  (`FileSizeLimitInBytes`).
 
 ## When the button appears
 
@@ -458,6 +515,72 @@ If you ever see it, the sequence is in use somewhere, and the answer is settled.
 
 When `available` is `false`, `reason` is one of `disabled`, `noBlob`, `notMainBlob`, `notOfficeFile`,
 `notEditable`, `noWritePermission`.
+
+## Without Web UI (custom UI)
+
+Web UI is optional. The WebDAV endpoint, its authentication chain and the Automation operations are
+server-side and work the same behind any UI. The Web UI button is only a client of
+`WebDavDirectEdit.GetUrl`, and a custom UI does the same in three steps.
+
+**1. Decide whether to show the action.** Mirror the rules of
+[When the button appears](#when-the-button-appears): an Office file by mime type or extension, per the
+`org.nuxeo.web.ui.webdavDirectEdit.<app>.*` properties; the `Write` permission; not a proxy, a version
+or trashed. No endpoint exposes those lists, so copy them from the configuration. The server re-checks
+everything anyway.
+
+**2. On click, and only on click, ask for the address**, authenticated as the end user:
+
+```bash
+curl -X POST "https://nuxeo.example.com/nuxeo/api/v1/automation/WebDavDirectEdit.GetUrl" \
+  -u "$NUXEO_USER:$NUXEO_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"input": "doc:<document-uid>", "params": {}}'
+```
+
+```json
+{"available": true, "app": "word", "fileName": "Report.docx",
+ "davPath": "<token>/Report.docx",
+ "davUrl": "https://nuxeo.example.com/nuxeo/site/officeedit/<token>/Report.docx",
+ "protocolUrl": "ms-word:ofe|u|https://nuxeo.example.com/nuxeo/site/officeedit/<token>/Report.docx",
+ "secure": true, "reason": null}
+```
+
+When `available` is `false`, show a message based on `reason`, see [Automation operations](#automation-operations).
+
+Every successful call issues a new address, valid for up to 30 days, that cannot be revoked. Do not call
+it to find out whether a document *can* be opened. Treat `davUrl` and `protocolUrl` as credentials:
+never log them, store them or send them to analytics.
+
+**3. Launch `protocolUrl`.** In a browser, click a detached anchor (`a.href = protocolUrl; a.click()`)
+rather than assigning `window.location`, which raises a navigation error when Office is not installed.
+Also render it as a real link the user can click as a fallback. A desktop application hands the URI to
+the operating system.
+
+### Authentication
+
+There are two separate legs:
+
+- **Custom UI to the Nuxeo REST API** (the `GetUrl` call): whatever the UI already uses, such as an
+  OAuth2/OIDC bearer token, a Nuxeo token, Basic or a session cookie. It must carry the **end user's**
+  identity: the edit session is issued to the caller, so a backend calling Nuxeo with a service account
+  would make Office edit as that account.
+- **Office to `/nuxeo/site/officeedit`**: nothing to do. The token in the address authenticates Office,
+  then the Basic fallback applies, as described in
+  [Authentication, and single sign-on](#authentication-and-single-sign-on). On SSO-only deployments,
+  expose `WebDavDirectEdit.GetCredentials` and `WebDavDirectEdit.RevokeCredentials` the way the Web UI
+  dialog does, so users have something to type at the prompt.
+
+### Deployment
+
+- Office talks to Nuxeo **directly**, not through the custom UI. The address is built from
+  `nuxeo.labs.webdavDirectEdit.baseUrl`, else `nuxeo.url`, so that URL must be reachable from the
+  users' desktops, over HTTPS.
+- Any gateway, reverse proxy or WAF in front of Nuxeo must pass `/nuxeo/site/officeedit/*` through
+  unchanged and without adding its own authentication, including the WebDAV methods (`OPTIONS`,
+  `PROPFIND`, `PROPPATCH`, `LOCK`, `UNLOCK`, `PUT`, `MOVE`, `COPY`, `DELETE`, `MKCOL`) and headers
+  (`Depth`, `Destination`, `Overwrite`, `If`, `Lock-Token`, `Timeout`, `Authorization`).
+- A custom UI served from another origin needs a Nuxeo `corsConfig` contribution for `/nuxeo/api/.*`.
+  The WebDAV endpoint needs none: Office is not a browser.
 
 ## Build
 

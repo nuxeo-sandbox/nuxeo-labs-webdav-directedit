@@ -1,7 +1,8 @@
 # AGENTS.md — nuxeo-labs-webdav-directedit
 
 Nuxeo LTS 2025 plugin: an **Open in Microsoft Office** button in Web UI that opens the document's main blob in
-Word/Excel/PowerPoint over WebDAV; saving from Office updates the document.
+Word/Excel/PowerPoint over WebDAV; saving from Office updates the document. **Web UI is optional**: the endpoint and
+the Automation ops also serve custom UIs (README "Without Web UI (custom UI)").
 
 It ships **its own WebDAV endpoint** and does **not** use the `nuxeo-webdav` addon, on purpose — see "Why not
 nuxeo-webdav". Do not reintroduce it.
@@ -21,8 +22,8 @@ mvn -o clean install                                                       # als
   Started` (both at ERROR) and a `FulltextExtractorWork` / `NotOfficeXmlFileException` stack trace (fixtures store
   plain text under `.docx` names) are expected. Judge by `Tests run:` or `target/surefire-reports/*.txt`.
 - After touching any pom, check the MP: `unzip -l nuxeo-labs-webdav-directedit-package/target/*.zip` must show
-  **exactly one jar, ours**, and `package.xml` must depend **only on `nuxeo-web-ui`**. A non-`provided` dependency
-  would end up in the zip.
+  **exactly one jar, ours**, and `package.xml` must have **no hard `<dependencies>`**, `nuxeo-web-ui` only under
+  `<optional-dependencies>`. A non-`provided` dependency would end up in the zip.
 
 ## Map
 
@@ -134,6 +135,10 @@ every save is a full upload.
 - Mounted by `deployment-fragment.xml` (`web#SERVLET`, `/site/officeedit/*`). More specific than WebEngine's `/site/*`,
   so it wins while **inheriting** the auth, request-controller and header filters. **Do not add filter mappings**:
   a filter matched by both patterns runs twice.
+- The fragment `<require>`s **`all`**, never `org.nuxeo.web.ui`. `all` is the marker `FragmentRegistry` registers
+  last, so the i18n appends still run after Web UI's unzip/copies (which overwrite `messages*.json`); requiring a
+  bundle that is not deployed leaves the fragment unprocessed ("Bundle not preprocessed" ERROR) and the servlet
+  unmounted. `TestDeploymentFragment` pins it.
 - `webdav-directedit-requestcontroller-contrib.xml`: the attribute is spelled **`synchonize`** on purpose — that is
   the name `FilterConfigDescriptor` declares. Do not "fix" it.
 - `AutoPrompt=true` on the Basic plugin gives `401 + WWW-Authenticate` instead of a login-page redirect.
@@ -167,6 +172,8 @@ Not history: it explains why old instincts are wrong here.
 
 ## Web UI
 
+- **Optional** (MP `<optional-dependencies>`). Nothing server-side may depend on it; without it, the element and i18n
+  files are still unzipped under `nuxeo.war/ui/` and simply never loaded.
 - Slot `DOCUMENT_ACTIONS`, `order="12"` (Edit 10, Delete 15). A **document** action, not a blob action: only the main
   blob is served. `xpath` defaults from `Nuxeo.UI.config` `webdavDirectEdit.mainBlobXPath`.
 - `showLabel` is **mandatory**: `nuxeo-actions-menu` sets `show-label` when the action overflows into `⋮`.
