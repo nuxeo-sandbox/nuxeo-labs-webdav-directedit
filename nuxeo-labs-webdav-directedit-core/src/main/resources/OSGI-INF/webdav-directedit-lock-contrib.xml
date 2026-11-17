@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<component name="nuxeo.labs.webdavdirectedit.lock">
+
+  <documentation>
+    Releases the edit locks Microsoft Office left behind.
+
+    When nuxeo.labs.webdavDirectEdit.lockOnOpen.enabled is true, clicking the button locks the document, and Office's
+    own UNLOCK releases it when the file is closed. Two cases never reach that UNLOCK: Office never opened the file
+    (the launch prompt was cancelled, Office is not installed), or Office went away without unlocking (crash, network
+    loss). Every lock taken by this plugin is therefore recorded with a deadline, and this job releases those past it.
+
+    It only ever releases a lock the plugin took itself, and only if it is still that very lock: same owner, same
+    creation time. A lock the user set by hand is never touched.
+
+    Each record is claimed atomically before it is released, so running the job on several nodes at once, as happens
+    when the Quartz store is not clustered, releases each lock exactly once.
+
+    @since 2025.3
+  </documentation>
+
+  <require>nuxeo.labs.webdavdirectedit.properties</require>
+
+  <extension target="org.nuxeo.ecm.core.scheduler.SchedulerService" point="schedule">
+    <schedule id="officeEditLockExpiration">
+      <event>officeEditLockExpiration</event>
+      <!-- every minute: the shortest deadline is a few minutes, see lockOnOpen.openTimeoutMinutes -->
+      <cronExpression>0 * * * * ?</cronExpression>
+    </schedule>
+  </extension>
+
+  <extension target="org.nuxeo.ecm.core.event.EventServiceComponent" point="listener">
+    <listener name="officeEditLockExpiration" async="true" postCommit="true"
+      class="nuxeo.labs.webdav.directedit.lock.OfficeEditLockExpirationListener">
+      <event>officeEditLockExpiration</event>
+    </listener>
+  </extension>
+
+</component>

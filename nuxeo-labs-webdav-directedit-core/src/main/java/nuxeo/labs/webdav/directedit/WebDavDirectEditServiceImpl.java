@@ -30,7 +30,10 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.Lock;
+import org.nuxeo.ecm.core.api.LockException;
 import org.nuxeo.ecm.core.api.blobholder.BlobHolder;
 import org.nuxeo.ecm.core.api.blobholder.DocumentBlobHolder;
 import org.nuxeo.ecm.core.api.security.SecurityConstants;
@@ -40,6 +43,7 @@ import org.nuxeo.runtime.model.ComponentName;
 import org.nuxeo.runtime.model.DefaultComponent;
 import org.nuxeo.runtime.services.config.ConfigurationService;
 
+import nuxeo.labs.webdav.directedit.lock.OfficeEditLockTracker;
 import nuxeo.labs.webdav.directedit.server.DavTarget;
 import nuxeo.labs.webdav.directedit.server.OfficeEditSessionStore;
 
@@ -65,6 +69,8 @@ public class WebDavDirectEditServiceImpl extends DefaultComponent implements Web
     protected static final ComponentName WEBDAV_ADDON_COMPONENT = new ComponentName("org.nuxeo.ecm.webdav.service");
 
     protected final OfficeEditSessionStore sessionStore = new OfficeEditSessionStore();
+
+    protected final OfficeEditLockTracker lockTracker = new OfficeEditLockTracker();
 
     /**
      * Warns when the platform's WebDAV addon is deployed alongside this plugin.
@@ -184,10 +190,31 @@ public class WebDavDirectEditServiceImpl extends DefaultComponent implements Web
             return DirectEditInfo.unavailable(UnavailabilityReason.NOT_OFFICE_FILE, fileName);
         }
 
+        CoreSession session = doc.getCoreSession();
+        String userName = session.getPrincipal().getName();
+        // The lock is checked before the permission. LockSecurityPolicy denies write to anyone but the lock owner, so
+        // a document locked by a colleague would otherwise be reported as a missing permission; and administrators
+        // bypass that policy altogether, so for them only the lock itself tells.
+        Lock lock = session.getLockInfo(doc.getRef());
+        if (lock != null && !userName.equals(lock.getOwner())) {
+            return DirectEditInfo.locked(fileName, lock.getOwner());
+        }
+
         // Office locks the document then saves it back, so read-only access would only fail late, after the user has
         // already made changes. This is the same permission the endpoint checks before committing.
-        if (!doc.getCoreSession().hasPermission(doc.getRef(), SecurityConstants.WRITE_PROPERTIES)) {
+        if (!session.hasPermission(doc.getRef(), SecurityConstants.WRITE_PROPERTIES)) {
             return DirectEditInfo.unavailable(UnavailabilityReason.NO_WRITE_PERMISSION, fileName);
+        }
+
+        // Locked now rather than when Office connects, as Nuxeo Drive does, so that nobody can take the document while
+        // Office starts. Done before the session is minted: no address is issued for a document that could not be
+        // locked.
+        try {
+            lockTracker.lockOnOpen(session, doc);
+        } catch (LockException e) {
+            // Somebody locked it between the check above and now.
+            Lock current = session.getLockInfo(doc.getRef());
+            return DirectEditInfo.locked(fileName, current == null ? null : current.getOwner());
         }
 
         /*
@@ -195,7 +222,7 @@ public class WebDavDirectEditServiceImpl extends DefaultComponent implements Web
          * document id: same length, but it also authenticates the request, which is the only way Microsoft Office can
          * be spared a credentials prompt it cannot answer under single sign-on.
          */
-        String token = sessionStore.create(doc.getId(), doc.getCoreSession().getPrincipal().getName());
+        String token = sessionStore.create(doc.getId(), userName);
         String davPath = token + "/" + fileName;
         String davUrl = getBaseUrl(requestBaseUrl) + WEBDAV_PATH_PREFIX + DavTarget.encode(token) + "/"
                 + DavTarget.encode(fileName);

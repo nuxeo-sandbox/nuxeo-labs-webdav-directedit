@@ -126,8 +126,10 @@ public final class DavConstants {
     /* ==================== Locking ==================== */
 
     /**
-     * Lock timeout advertised to the client, in seconds. Office refreshes its lock well within this window, and the
-     * real lifetime is governed by the Nuxeo document lock, which never expires on its own.
+     * Lock timeout advertised to the client, in seconds. The Nuxeo document lock itself never expires; with
+     * {@code lockOnOpen} enabled, the plugin releases a lock it took after {@code inactivityTimeoutMinutes} without any
+     * request from Office, which is never allowed below this value. Whether Office refreshes its lock within this
+     * window has not been measured.
      */
     public static final long LOCK_TIMEOUT_SECONDS = 3600L;
 

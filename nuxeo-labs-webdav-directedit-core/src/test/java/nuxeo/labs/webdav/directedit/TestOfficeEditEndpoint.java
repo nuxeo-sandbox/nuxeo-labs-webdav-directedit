@@ -71,6 +71,7 @@ import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.IdRef;
+import org.nuxeo.ecm.core.api.Lock;
 import org.nuxeo.ecm.core.api.blobholder.BlobHolder;
 import org.nuxeo.ecm.core.api.trash.TrashService;
 import org.nuxeo.runtime.api.Framework;
@@ -81,6 +82,7 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
 import org.nuxeo.runtime.test.runner.ServletContainerFeature;
 import org.nuxeo.runtime.test.runner.TransactionalFeature;
 
+import nuxeo.labs.webdav.directedit.lock.OfficeEditLockStore;
 import nuxeo.labs.webdav.directedit.server.OfficeEditSessionStore;
 
 /**
@@ -111,6 +113,11 @@ public class TestOfficeEditEndpoint {
 
     @Inject
     protected TransactionalFeature transactionalFeature;
+
+    @Inject
+    protected WebDavDirectEditService directEditService;
+
+    protected final OfficeEditLockStore lockStore = new OfficeEditLockStore();
 
     protected CloseableHttpClient client;
 
@@ -232,6 +239,72 @@ public class TestOfficeEditEndpoint {
         }
         transactionalFeature.nextTransaction();
         assertNull(session.getLockInfo(document.getRef()));
+    }
+
+    /* ==================== Lock on open ==================== */
+
+    /**
+     * Reopened from Office's recent files, there is no click: Office takes the lock itself. It is the plugin's lock all
+     * the same, recorded, and released by Office's own {@code UNLOCK}.
+     */
+    @Test
+    public void shouldTrackALockOfficeTookItself() throws Exception {
+        String lockToken = lock(fileUri());
+        transactionalFeature.nextTransaction();
+        assertEquals(OfficeEditLockStore.Status.OPEN, lockStore.get(document.getId()).orElseThrow().status());
+
+        unlock(fileUri(), lockToken);
+        transactionalFeature.nextTransaction();
+        assertNull(session.getLockInfo(document.getRef()));
+        assertTrue(lockStore.get(document.getId()).isEmpty());
+    }
+
+    @Test
+    public void shouldReleaseTheLockTakenOnClickWhenOfficeUnlocks() throws Exception {
+        String uri = clickUri();
+        assertNotNull("the click locks the document", session.getLockInfo(document.getRef()));
+
+        String lockToken = lock(uri);
+        unlock(uri, lockToken);
+        transactionalFeature.nextTransaction();
+
+        assertNull("closing the file in Office releases the lock", session.getLockInfo(document.getRef()));
+        assertTrue(lockStore.get(document.getId()).isEmpty());
+    }
+
+    @Test
+    public void shouldKeepALockTheUserTookByHandWhenOfficeUnlocks() throws Exception {
+        Lock manual = session.setLock(document.getRef());
+        session.save();
+        transactionalFeature.nextTransaction();
+
+        String lockToken = lock(fileUri());
+        unlock(fileUri(), lockToken);
+        transactionalFeature.nextTransaction();
+
+        Lock after = session.getLockInfo(document.getRef());
+        assertNotNull("a lock set by hand must survive Office closing the file", after);
+        assertEquals(manual.getCreated(), after.getCreated());
+    }
+
+    @Test
+    public void shouldHideTheClickLockUntilOfficeLocks() throws Exception {
+        // Before this feature Office never found a lock before taking its own; keep it that way.
+        String uri = clickUri();
+        assertFalse(propfind(uri).contains("activelock"));
+
+        lock(uri);
+        assertTrue("once Office holds it, the lock is advertised as usual", propfind(uri).contains("activelock"));
+    }
+
+    @Test
+    public void shouldMarkTheDocumentOpenOnSave() throws Exception {
+        // A save proves Office is working on the file, even had it never sent LOCK.
+        String uri = clickUri();
+        try (CloseableHttpResponse response = execute(put(uri, "saved"))) {
+            assertEquals(204, status(response));
+        }
+        assertEquals(OfficeEditLockStore.Status.OPEN, lockStore.get(document.getId()).orElseThrow().status());
     }
 
     /* ==================== Saving ==================== */
@@ -561,6 +634,41 @@ public class TestOfficeEditEndpoint {
     }
 
     /* ==================== Helpers ==================== */
+
+    /**
+     * Clicks the button, so to speak: the service locks the document and mints an address.
+     *
+     * @return the address Office would be pointed at
+     */
+    protected String clickUri() {
+        DirectEditInfo info = directEditService.getDirectEditInfo(session.getDocument(document.getRef()), null, null);
+        assertTrue(info.available());
+        transactionalFeature.nextTransaction();
+        return baseUri() + "/" + info.davPath();
+    }
+
+    /** Sends Office's {@code LOCK} and returns the lock token, angle brackets included. */
+    protected String lock(String uri) throws IOException {
+        var lock = new HttpLock(uri, new LockInfo(Scope.EXCLUSIVE, Type.WRITE, USERNAME, 10000L, false));
+        try (CloseableHttpResponse response = execute(lock)) {
+            assertEquals(200, status(response));
+            return response.getFirstHeader("Lock-Token").getValue();
+        }
+    }
+
+    protected void unlock(String uri, String lockToken) throws IOException {
+        try (CloseableHttpResponse response = execute(new HttpUnlock(uri, lockToken))) {
+            assertEquals(204, status(response));
+        }
+    }
+
+    protected String propfind(String uri) throws IOException {
+        var request = new HttpPropfind(uri, DavConstants.PROPFIND_ALL_PROP, DavConstants.DEPTH_0);
+        try (CloseableHttpResponse response = execute(request)) {
+            assertEquals(207, status(response));
+            return body(response);
+        }
+    }
 
     protected String baseUri() {
         return servletContainerFeature.getHttpUrl() + "/site/officeedit";

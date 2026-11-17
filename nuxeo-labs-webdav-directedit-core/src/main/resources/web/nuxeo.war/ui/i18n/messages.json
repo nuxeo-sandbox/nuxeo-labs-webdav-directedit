@@ -31,5 +31,6 @@
   "webdavDirectEdit.error.notMainBlob": "Only the main file of a document can be opened this way. Attachments are not reachable over WebDAV.",
   "webdavDirectEdit.error.notOfficeFile": "\"{0}\" is not a Microsoft Office document.",
   "webdavDirectEdit.error.noWritePermission": "You do not have permission to modify this document.",
+  "webdavDirectEdit.error.locked": "\"{0}\" is locked by {1}. It can be opened in Microsoft Office once it is unlocked.",
   "webdavDirectEdit.error.unknown": "Something went wrong while preparing the document."
 }

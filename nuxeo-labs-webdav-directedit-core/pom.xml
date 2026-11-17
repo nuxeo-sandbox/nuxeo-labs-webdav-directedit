@@ -52,10 +52,16 @@
       <artifactId>nuxeo-core-cache</artifactId>
       <scope>provided</scope>
     </dependency>
-    <!-- KeyValueStore, which holds the edit sessions. It has a native per-entry TTL. -->
+    <!-- KeyValueStore, which holds the edit sessions and the edit locks. It has a native per-entry TTL. -->
     <dependency>
       <groupId>org.nuxeo.runtime</groupId>
       <artifactId>nuxeo-runtime-kv</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <!-- Scheduler and event listener releasing the edit locks Office left behind. -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.core</groupId>
+      <artifactId>nuxeo-core-event</artifactId>
       <scope>provided</scope>
     </dependency>
 

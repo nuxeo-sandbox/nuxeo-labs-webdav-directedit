@@ -100,6 +100,30 @@
     -->
     <property name="nuxeo.labs.webdavDirectEdit.maxUploadSizeMB">512</property>
 
+    <!--
+      Server-only. Whether clicking the button locks the document straight away, and Office's UNLOCK releases it when
+      the file is closed, as Nuxeo Drive Direct Edit does. A lock the user had set by hand before clicking is never
+      released by the plugin.
+
+      Set to false to go back to the original behaviour: the document is locked and unlocked by Office alone, nothing
+      is recorded, and a lock left behind by a crashed Office stays until someone removes it.
+    -->
+    <property name="nuxeo.labs.webdavDirectEdit.lockOnOpen.enabled">true</property>
+
+    <!--
+      Server-only. How long, in minutes, the lock taken on click waits for Office to connect. Past it, the lock is
+      released: the launch prompt was cancelled, or Office is not installed. The release job runs every minute, so the
+      actual delay is up to one minute longer.
+    -->
+    <property name="nuxeo.labs.webdavDirectEdit.lockOnOpen.openTimeoutMinutes">5</property>
+
+    <!--
+      Server-only. How long, in minutes, a document opened in Office stays locked with no request at all from Office.
+      Past it, the lock is released: Office crashed or lost the network. Every LOCK, save and request on the file
+      pushes the deadline back. Never less than 61, because Office is told its WebDAV lock lasts one hour.
+    -->
+    <property name="nuxeo.labs.webdavDirectEdit.lockOnOpen.inactivityTimeoutMinutes">65</property>
+
   </extension>
 
 </component>

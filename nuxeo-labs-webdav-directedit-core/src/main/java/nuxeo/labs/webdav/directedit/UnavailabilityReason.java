@@ -47,7 +47,15 @@ public enum UnavailabilityReason {
     NOT_EDITABLE("notEditable"),
 
     /** The user cannot write the document, so Office would fail on save. */
-    NO_WRITE_PERMISSION("noWritePermission");
+    NO_WRITE_PERMISSION("noWritePermission"),
+
+    /**
+     * The document is locked by another user. Checked before the permission, because the lock alone denies write to
+     * everyone but its owner and would otherwise be misreported as a missing permission.
+     *
+     * @since 2025.3
+     */
+    LOCKED("locked");
 
     protected final String id;
 

@@ -98,6 +98,7 @@ public class TestDirectEditOperations {
                 json.get("protocolUrl").asText());
         assertTrue(json.get("secure").asBoolean());
         assertTrue(json.get("reason").isNull());
+        assertTrue(json.get("lockOwner").isNull());
     }
 
     @Test
@@ -115,6 +116,7 @@ public class TestDirectEditOperations {
         assertTrue(json.has("davUrl"));
         assertTrue(json.has("davPath"));
         assertTrue(json.has("secure"));
+        assertTrue(json.has("lockOwner"));
     }
 
     @Test

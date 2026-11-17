@@ -24,16 +24,18 @@ package nuxeo.labs.webdav.directedit;
  * @param available whether the document can be opened
  * @param app the target Office application, {@code null} when not {@link #available}
  * @param fileName the blob file name, {@code null} when there is no blob
- * @param davPath {@code <docId>/<fileName>}, unencoded, {@code null} when not {@link #available}
+ * @param davPath {@code <sessionToken>/<fileName>}, unencoded, {@code null} when not {@link #available}
  * @param davUrl the absolute WebDAV URL, {@code null} when not {@link #available}
  * @param protocolUrl the {@code ms-word:ofe|u|...} URI, {@code null} when not {@link #available}
  * @param secure whether {@link #davUrl} uses HTTPS; Microsoft Office on Windows refuses to send credentials over plain
  *            HTTP by default
  * @param reason why the document cannot be opened, {@code null} when {@link #available}
+ * @param lockOwner who holds the lock when {@link #reason} is {@link UnavailabilityReason#LOCKED}, {@code null}
+ *            otherwise (since 2025.3)
  * @since 2025.1
  */
 public record DirectEditInfo(boolean available, OfficeApp app, String fileName, String davPath, String davUrl,
-        String protocolUrl, boolean secure, UnavailabilityReason reason) {
+        String protocolUrl, boolean secure, UnavailabilityReason reason, String lockOwner) {
 
     /**
      * Builds an unavailable result carrying the given reason.
@@ -47,7 +49,17 @@ public record DirectEditInfo(boolean available, OfficeApp app, String fileName, 
      * message.
      */
     public static DirectEditInfo unavailable(UnavailabilityReason reason, String fileName) {
-        return new DirectEditInfo(false, null, fileName, null, null, null, false, reason);
+        return new DirectEditInfo(false, null, fileName, null, null, null, false, reason, null);
+    }
+
+    /**
+     * Builds the result for a document locked by somebody else, naming them so the user knows whom to ask.
+     *
+     * @since 2025.3
+     */
+    public static DirectEditInfo locked(String fileName, String lockOwner) {
+        return new DirectEditInfo(false, null, fileName, null, null, null, false, UnavailabilityReason.LOCKED,
+                lockOwner);
     }
 
     /**
@@ -55,6 +67,6 @@ public record DirectEditInfo(boolean available, OfficeApp app, String fileName, 
      */
     public static DirectEditInfo available(OfficeApp app, String fileName, String davPath, String davUrl) {
         return new DirectEditInfo(true, app, fileName, davPath, davUrl, app.buildOpenForEditUri(davUrl),
-                davUrl.regionMatches(true, 0, "https://", 0, 8), null);
+                davUrl.regionMatches(true, 0, "https://", 0, 8), null, null);
     }
 }

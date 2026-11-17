@@ -4,6 +4,9 @@ Adds an **Open in Microsoft Office** button to the Nuxeo Web UI. One click opens
 in Word, Excel or PowerPoint on the user's desktop. When the user saves from the Office application,
 the changes go straight back to Nuxeo and update the document.
 
+The document is **locked in Nuxeo as soon as the user clicks**, and unlocked when the file is closed in
+Office, the way Nuxeo Drive Direct Edit works. See [Locking](#locking).
+
 Works on both macOS and Windows, which support WebDAV natively.
 
 Web UI is optional: the endpoint and the Automation operations work the same behind a custom UI, see
@@ -36,9 +39,11 @@ resolves server-side to exactly one document and one user — so it addresses th
 authenticates the request. Addressing this way, rather than by repository path, is what makes the
 feature work for *any* document, and what the rest of the design follows from.
 
-The edit cycle itself is driven entirely by Office:
+The edit cycle itself is driven entirely by Office, except for the lock taken on click:
 
 ```
+Web UI  --  WebDavDirectEdit.GetUrl  -->  Nuxeo                -->  Nuxeo lock taken
+                                                                                       |
 Web UI  --  ms-word:ofe|u|https://host/nuxeo/site/officeedit/<token>/Report.docx  -->  Word
                                                                                        |
 Word  --  OPTIONS, PROPFIND, LOCK, GET  -->  /nuxeo/site/officeedit/...                |
@@ -142,7 +147,8 @@ The button is shown only when all of the following hold:
 - the document has a file in `file:content`;
 - that file's mime type **or** its file name extension matches a Microsoft Office format;
 - the user has the `Write` permission;
-- the document is not a proxy, a version, or trashed.
+- the document is not a proxy, a version, or trashed;
+- the document is not locked by another user. The lock owner still sees the button.
 
 Clicking then runs a server-side check that is authoritative, and reports a clear message when the
 document cannot be opened.
@@ -168,10 +174,60 @@ browser and the server, so the two can never disagree about which files are Offi
 | `nuxeo.labs.webdavDirectEdit.capabilityUrl.ttlMinutes` | `480` | How long the URL keeps **authenticating**, in idle minutes. Server-side only |
 | `nuxeo.labs.webdavDirectEdit.session.ttlMinutes` | `43200` | **Absolute** lifetime of an address, from issue. Never refreshed. Server-side only |
 | `nuxeo.labs.webdavDirectEdit.maxUploadSizeMB` | `512` | Largest accepted `PUT`, hence the largest editable document. Server-side only |
+| `nuxeo.labs.webdavDirectEdit.lockOnOpen.enabled` | `true` | Locks the document on click and releases it when Office closes the file, see [Locking](#locking). Server-side only |
+| `nuxeo.labs.webdavDirectEdit.lockOnOpen.openTimeoutMinutes` | `5` | How long the lock taken on click waits for Office to lock the file or save it. Server-side only |
+| `nuxeo.labs.webdavDirectEdit.lockOnOpen.inactivityTimeoutMinutes` | `65` | How long a document open in Office stays locked with no request from Office. Never less than `61`. Server-side only |
 
 `nuxeo.labs.webdavDirectEdit.baseUrl` is the one to set when Nuxeo is reached over plain HTTP but a
 HTTPS entry point exists, since Office on Windows needs HTTPS. When it is empty, `nuxeo.url` is used,
 unless it still points at localhost, in which case the address the browser is using is taken instead.
+
+## Locking
+
+With `nuxeo.labs.webdavDirectEdit.lockOnOpen.enabled=true`, the default, the document is locked from
+the click until the file is closed in Office. This is what Nuxeo Drive Direct Edit does. The WOPI
+integration for Office Online also holds a lock while the file is open, but takes it when Office Online
+asks for it rather than on click.
+
+| Event | What happens to the Nuxeo lock |
+|---|---|
+| The user clicks the button | **Locked** for that user, before Office even starts. The page shows the lock straight away |
+| Office locks the file | Kept. From now on, the lock lives as long as Office keeps talking to the server |
+| Office saves | Kept |
+| The file is reopened from Office's recent files, with no click | **Locked** by Office's own `LOCK`, then handled the same way: released when the file is closed, or after the inactivity timeout |
+| The user closes the file in Office, which sends `UNLOCK` | **Released** at once |
+| Office never locks nor saves the file: launch prompt cancelled, Office not installed, file opened read-only | Released after `openTimeoutMinutes`, 5 by default |
+| Office goes away without unlocking: crash, network loss | Released after about `inactivityTimeoutMinutes` with no request from Office, 65 by default |
+
+The two timeouts are enforced by a scheduled job that runs **every minute**, so a release can come up
+to one minute later. Each release writes one `INFO` line, see [Reading the log](#reading-the-log):
+
+```
+INFO  [OfficeEditLockTracker] Office edit: released the lock on document 1a2b3c4d-… held by jdoe, which Office never opened
+```
+
+**A lock the user set by hand is never released by the plugin.** If the user locked the document with
+the Web UI Lock button *before* clicking *Open in Microsoft Office*, the document opens normally, and
+stays locked after Office closes it: the lock is theirs. The same holds for a lock set by hand after
+the plugin's own lock was removed. To tell the two apart, the plugin records every lock it takes, and
+releases a lock only if it is still that very lock, same owner and same creation time.
+
+**A document locked by somebody else** is not offered: the button is hidden. A custom UI calling
+`WebDavDirectEdit.GetUrl` anyway gets `available: false`, `reason: "locked"` and the owner in
+`lockOwner`.
+
+The records live in the `officeEditLock` key/value store, next to the edit sessions. On a cluster the
+key/value store must be shared, which it is with the standard SQL and MongoDB templates. Each record is
+claimed atomically before its lock is released, so the job may run on every node.
+
+With `lockOnOpen.enabled=false`, clicking does not lock: Office's own `LOCK` and `UNLOCK` drive the
+lock, as before this feature, and a lock left behind by a crashed Office stays until someone removes it.
+Two things do not depend on the switch:
+
+- a document locked by another user is still refused: the button is hidden, and `GetUrl` answers
+  `reason: "locked"`;
+- locks the plugin recorded before the switch was turned off are still released when their deadline
+  passes.
 
 ## Authentication, and single sign-on
 
@@ -308,6 +364,22 @@ Editing*. Between 10 and 45 seconds elapsed in the sessions measured — human r
 **During that pause the document is unlocked in Nuxeo**, so another user can take it. Nothing in the
 plugin can prevent this: it is the client that releases the lock.
 
+**This includes the lock taken on click.** Office's `UNLOCK` is the only sign the plugin gets that a
+file was closed, and Word sends the very same `UNLOCK` when it enters Protected View. The plugin cannot
+tell the two apart, so it releases the lock at once, as it does when the file is really closed; Word
+locks the document again when the user clicks *Enable Editing*. Waiting a little before releasing would
+bridge the gap, at the cost of keeping every closed document locked for that long; it was deliberately
+not done. On Windows, the sequence is therefore:
+
+| Step | Nuxeo lock |
+|---|---|
+| Click on the button | locked |
+| Word locks the file, reads it, opens it in Protected View, then sends `UNLOCK` | **unlocked** |
+| The user clicks *Enable Editing*, and Word sends `LOCK` | locked again |
+| The user closes the file | unlocked |
+
+Putting the Nuxeo host in a trusted zone, see above, removes Protected View, hence the gap.
+
 Office normally remembers a document after the first *Enable Editing* and stops prompting for it — the
 *Trusted Documents* mechanism, which is keyed on the address. **A new address is issued on every click
 of the button**, so that memory is currently defeated. See the note on the recent-files list under
@@ -381,6 +453,10 @@ The plugin writes one `INFO` line per save:
 INFO  [OfficeEditServlet] Office edit: updated main blob of document 1a2b3c4d-… (Report.docx, 24576 bytes)
 ```
 
+and one per lock released because Office never opened the file or went silent, see [Locking](#locking).
+A lock released by Office's own `UNLOCK` gets no line of its own: at `DEBUG`, it shows only as the
+`UNLOCK` request line.
+
 **It is not visible with the default logging configuration.** Nuxeo's stock `log4j2.xml` logs at `WARN`
 by default, and the plugin's logger, `nuxeo.labs.webdav.directedit`, has no entry of its own. To see
 it, add one line inside `<Loggers>` in `$NUXEO_HOME/lib/log4j2.xml`; it covers every class in the
@@ -451,8 +527,26 @@ opened with the button, edited and saved back to Nuxeo successfully. That run di
 requests, so how Excel and PowerPoint save, with a direct `PUT` or with the transacted save described
 below, is not known yet.
 
+### Locking
+
+On 17 November 2026, the lock lifecycle described in [Locking](#locking) was checked against a real
+Office client, through the button:
+
+- the click locks the document, and the page shows the lock at once;
+- closing the file in Office unlocks it;
+- cancelling the launch prompt leaves the document locked, then releases it 5 to 6 minutes later;
+- a lock set by hand before opening the file is still there after Office closes it;
+- another user does not see the button while the document is locked.
+
 ### Not yet verified
 
+- **the lock taken on click through Windows Protected View**: the sequence in
+  [What Protected View costs you](#what-protected-view-costs-you-until-it-is-turned-off) follows from
+  the code and from the trace of 22 September, but was not observed with locking on click;
+- **whether Office refreshes its WebDAV lock** while a document stays open. If it does not, and sends no
+  other request either, a document left open and idle for more than `inactivityTimeoutMinutes` is
+  unlocked in Nuxeo while still open in Office; saving still works, as long as nobody else locked it
+  meanwhile. With the plugin's logger at `DEBUG`, a refresh shows as `Office edit: lock refresh on ...`;
 - **opening the address with File then Open**, or from a mapped drive, rather than with the button.
   On Windows that route goes through the WebClient service, which is likely to produce a different
   request sequence — see below. The dialog advertises this route, so it matters;
@@ -502,14 +596,22 @@ If you ever see it, the sequence is in use somewhere, and the answer is settled.
   Documents* memory, which is keyed on the address, so the Protected View banner returns on every
   open instead of only the first. Reusing a single address per document and user would address both;
   it is not implemented yet.
-- **On Windows the document is briefly unlocked** while Protected View waits for *Enable Editing*.
+- **On Windows the document is briefly unlocked** while Protected View waits for *Enable Editing*, the
+  lock taken on click included, see
+  [What Protected View costs you](#what-protected-view-costs-you-until-it-is-turned-off).
 - **Full download and full upload.** WebDAV has no partial write: every save uploads the entire file.
   This is a property of the protocol, not of this plugin. The server side streams in both directions
   and supports HTTP `Range`, so nothing is ever held in memory.
 - **One version per editing session.** Nuxeo's versioning policy creates a version on the first save
   after the document is opened, not on every save, so frequent saving does not pile up versions.
-- **Stale locks.** Office locks the document while it is open. If Office crashes, the Nuxeo lock
-  remains; it can be cleared with the standard Lock toggle button in the Web UI.
+- **Stale locks.** If Office crashes, the lock the plugin took is released after
+  `inactivityTimeoutMinutes`, 65 by default, see [Locking](#locking). Until then, or for good when
+  `lockOnOpen.enabled` is `false`, it can be cleared with the standard Lock toggle button in the Web UI.
+- **Closing a document locked by hand does not unlock it.** That is on purpose, see
+  [Locking](#locking), but it differs from Nuxeo Drive and from the WOPI integration, which both release
+  a lock their user had set by hand.
+- **Clicking locks.** Clicking the button and then not opening the file, or cancelling the launch
+  prompt, keeps the document locked for `openTimeoutMinutes`, 5 by default.
 - **Single repository.** Documents are resolved in the default repository.
 - **Addresses expire.** `session.ttlMinutes` after they were issued, 30 days by default, an address kept
   in Office's recent files stops working entirely and the user clicks the button again. This ceiling is
@@ -524,12 +626,13 @@ If you ever see it, the sequence is in use somewhere, and the answer is settled.
 
 | Operation | Input | Output | Purpose |
 |---|---|---|---|
-| `WebDavDirectEdit.GetUrl` | Document | JSON Blob | `{available, app, fileName, davPath, davUrl, protocolUrl, secure, reason}` |
+| `WebDavDirectEdit.GetUrl` | Document | JSON Blob | `{available, app, fileName, davPath, davUrl, protocolUrl, secure, reason, lockOwner}`. Also locks the document unless `lockOnOpen.enabled` is `false`, see [Locking](#locking) |
 | `WebDavDirectEdit.GetCredentials` | void | JSON Blob | `{username, token, enabled}` |
 | `WebDavDirectEdit.RevokeCredentials` | void | void | Revokes the caller's own token |
 
 When `available` is `false`, `reason` is one of `disabled`, `noBlob`, `notMainBlob`, `notOfficeFile`,
-`notEditable`, `noWritePermission`.
+`notEditable`, `noWritePermission`, `locked`. With `locked`, `lockOwner` is the user holding the lock;
+it is `null` otherwise.
 
 ## Without Web UI (custom UI)
 
@@ -540,8 +643,9 @@ server-side and work the same behind any UI. The Web UI button is only a client 
 **1. Decide whether to show the action.** Mirror the rules of
 [When the button appears](#when-the-button-appears): an Office file by mime type or extension, per the
 `org.nuxeo.web.ui.webdavDirectEdit.<app>.*` properties; the `Write` permission; not a proxy, a version
-or trashed. No endpoint exposes those lists, so copy them from the configuration. The server re-checks
-everything anyway.
+or trashed; not locked by another user (`lockOwner`, with the `fetch-document: lock` header). No
+endpoint exposes those lists, so copy them from the configuration. The server re-checks everything
+anyway.
 
 **2. On click, and only on click, ask for the address**, authenticated as the end user:
 
@@ -557,14 +661,17 @@ curl -X POST "https://nuxeo.example.com/nuxeo/api/v1/automation/WebDavDirectEdit
  "davPath": "<token>/Report.docx",
  "davUrl": "https://nuxeo.example.com/nuxeo/site/officeedit/<token>/Report.docx",
  "protocolUrl": "ms-word:ofe|u|https://nuxeo.example.com/nuxeo/site/officeedit/<token>/Report.docx",
- "secure": true, "reason": null}
+ "secure": true, "reason": null, "lockOwner": null}
 ```
 
 When `available` is `false`, show a message based on `reason`, see [Automation operations](#automation-operations).
 
-Every successful call issues a new address, valid for up to 30 days, that cannot be revoked. Do not call
-it to find out whether a document *can* be opened. Treat `davUrl` and `protocolUrl` as credentials:
-never log them, store them or send them to analytics.
+Every successful call issues a new address, valid for up to 30 days, that cannot be revoked. Unless
+`lockOnOpen.enabled` is `false`, it also **locks the document** for the caller until Office closes the
+file, or for `openTimeoutMinutes` if Office never locks nor saves it, see [Locking](#locking). Do not
+call it to find out whether a document *can* be opened. Treat `davUrl` and `protocolUrl` as
+credentials: never log them, store them or send them to analytics. Refresh the document afterwards if
+the UI shows its lock state.
 
 **3. Launch `protocolUrl`.** In a browser, click a detached anchor (`a.href = protocolUrl; a.click()`)
 rather than assigning `window.location`, which raises a navigation error when Office is not installed.

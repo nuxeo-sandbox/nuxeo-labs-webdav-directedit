@@ -12,4 +12,5 @@ Nuxeo-Component: OSGI-INF/webdav-directedit-properties.xml,
  OSGI-INF/webdav-directedit-operations.xml,
  OSGI-INF/webdav-directedit-auth-contrib.xml,
  OSGI-INF/webdav-directedit-requestcontroller-contrib.xml,
- OSGI-INF/webdav-directedit-webui-contrib.xml
+ OSGI-INF/webdav-directedit-webui-contrib.xml,
+ OSGI-INF/webdav-directedit-lock-contrib.xml

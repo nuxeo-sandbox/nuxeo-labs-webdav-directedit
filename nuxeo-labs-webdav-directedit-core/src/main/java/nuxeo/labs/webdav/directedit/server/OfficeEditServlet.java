@@ -33,6 +33,7 @@ import static nuxeo.labs.webdav.directedit.server.DavConstants.HEADER_DAV;
 import static nuxeo.labs.webdav.directedit.server.DavConstants.HEADER_DEPTH;
 import static nuxeo.labs.webdav.directedit.server.DavConstants.HEADER_DESTINATION;
 import static nuxeo.labs.webdav.directedit.server.DavConstants.HEADER_ETAG;
+import static nuxeo.labs.webdav.directedit.server.DavConstants.HEADER_IF;
 import static nuxeo.labs.webdav.directedit.server.DavConstants.HEADER_LAST_MODIFIED;
 import static nuxeo.labs.webdav.directedit.server.DavConstants.HEADER_LOCK_TOKEN;
 import static nuxeo.labs.webdav.directedit.server.DavConstants.HEADER_MS_AUTHOR_VIA;
@@ -93,6 +94,7 @@ import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.services.config.ConfigurationService;
 import org.nuxeo.runtime.transaction.TransactionHelper;
 
+import nuxeo.labs.webdav.directedit.lock.OfficeEditLockTracker;
 import nuxeo.labs.webdav.directedit.server.MultiStatusWriter.DavResourceInfo;
 
 /**
@@ -139,6 +141,8 @@ public class OfficeEditServlet extends HttpServlet {
     protected final transient ScratchStore scratchStore = new ScratchStore();
 
     protected final transient OfficeEditSessionStore sessionStore = new OfficeEditSessionStore();
+
+    protected final transient OfficeEditLockTracker lockTracker = new OfficeEditLockTracker();
 
     /**
      * {@code HttpServlet#service} answers {@code 501 Not Implemented} for anything outside the seven methods it knows,
@@ -484,6 +488,9 @@ public class OfficeEditServlet extends HttpServlet {
 
     /**
      * Locks the document. Office will not allow editing without this: an unlockable file is opened read-only.
+     * <p>
+     * Idempotent for the lock owner: Word for Windows sends three {@code LOCK}s per session, and with
+     * {@code lockOnOpen} the document is usually locked already, since the click.
      */
     protected void doLock(HttpServletRequest request, HttpServletResponse response) throws IOException {
         DavTarget target = target(request);
@@ -495,16 +502,18 @@ public class OfficeEditServlet extends HttpServlet {
         requireBlob(doc);
         String userName = session.getPrincipal().getName();
 
-        if (!session.hasPermission(doc.getRef(), SecurityConstants.WRITE_PROPERTIES)) {
-            throw new DavException(HttpServletResponse.SC_FORBIDDEN, "no write permission");
-        }
+        // The lock before the permission, as in checkWritable: LockSecurityPolicy would turn this 423 into a 403.
         Lock existing = session.getLockInfo(doc.getRef());
         if (existing != null && !userName.equals(existing.getOwner())) {
             throw new DavException(SC_LOCKED, "locked by " + existing.getOwner());
         }
+        if (!session.hasPermission(doc.getRef(), SecurityConstants.WRITE_PROPERTIES)) {
+            throw new DavException(HttpServletResponse.SC_FORBIDDEN, "no write permission");
+        }
+        Lock lock = existing;
         if (existing == null) {
             try {
-                session.setLock(doc.getRef());
+                lock = session.setLock(doc.getRef());
                 session.save();
             } catch (LockException e) {
                 // Another request took the lock between getLockInfo and setLock. Office understands 423, not 500.
@@ -512,6 +521,11 @@ public class OfficeEditServlet extends HttpServlet {
                 throw new DavException(SC_LOCKED, "locked concurrently");
             }
         }
+        if (log.isDebugEnabled() && request.getHeader(HEADER_IF) != null) {
+            // An RFC 4918 lock refresh. Whether Office refreshes its lock is not measured: this line answers it.
+            log.debug("Office edit: lock refresh on {}", safePath(request));
+        }
+        lockTracker.onOfficeLock(doc.getId(), lock, existing == null);
         String token = lockToken(doc.getId(), userName);
 
         response.setStatus(HttpServletResponse.SC_OK);
@@ -522,6 +536,12 @@ public class OfficeEditServlet extends HttpServlet {
         }
     }
 
+    /**
+     * Office's {@code UNLOCK} is the only sign that the file was closed.
+     * <p>
+     * It always answers 204, but with {@code lockOnOpen} enabled it releases only a lock this plugin took, on click
+     * or on Office's own {@code LOCK}. A lock the user set by hand before opening the file is theirs, and stays.
+     */
     protected void doUnlock(HttpServletRequest request, HttpServletResponse response) {
         DavTarget target = target(request);
         if (target.isRoot()) {
@@ -532,12 +552,19 @@ public class OfficeEditServlet extends HttpServlet {
         String userName = session.getPrincipal().getName();
 
         Lock existing = session.getLockInfo(doc.getRef());
-        if (existing != null) {
+        if (existing == null) {
+            lockTracker.forget(doc.getId());
+        } else {
             if (!userName.equals(existing.getOwner())) {
                 throw new DavException(SC_LOCKED, "locked by " + existing.getOwner());
             }
-            session.removeLock(doc.getRef());
-            session.save();
+            if (lockTracker.shouldReleaseOnOfficeUnlock(doc.getId(), existing)) {
+                session.removeLock(doc.getRef());
+                session.save();
+                lockTracker.forget(doc.getId());
+            } else {
+                log.debug("Office edit: kept the lock on document {}, which was set by hand", doc.getId());
+            }
         }
         sendStatus(response, HttpServletResponse.SC_NO_CONTENT);
     }
@@ -602,14 +629,18 @@ public class OfficeEditServlet extends HttpServlet {
             throw new DavException(HttpServletResponse.SC_FORBIDDEN, "session belongs to another user");
         }
         var ref = new IdRef(editSession.docId());
+        DocumentModel doc;
         try {
             if (!session.exists(ref)) {
                 throw new DavException(HttpServletResponse.SC_NOT_FOUND, "no such document");
             }
-            return session.getDocument(ref);
+            doc = session.getDocument(ref);
         } catch (DocumentNotFoundException e) {
             throw new DavException(HttpServletResponse.SC_NOT_FOUND, "no such document");
         }
+        // Any request from the owner on a document open in Office keeps its lock alive; at most one write a minute.
+        lockTracker.onActivity(doc.getId(), editSession.userName());
+        return doc;
     }
 
     protected static Blob requireBlob(DocumentModel doc) {
@@ -685,6 +716,7 @@ public class OfficeEditServlet extends HttpServlet {
         doc.putContextData(CoreSession.USER_CHANGE, Boolean.TRUE);
         session.saveDocument(doc);
         session.save();
+        lockTracker.onSave(doc.getId(), session.getPrincipal().getName());
         /*
          * At INFO, not DEBUG: this is the one event that matters operationally, it happens once per save, and without
          * it a whole editing session leaves no trace at all in the server log.
@@ -775,6 +807,10 @@ public class OfficeEditServlet extends HttpServlet {
     protected DavResourceInfo fileInfo(HttpServletRequest request, DavTarget target, DocumentModel doc, Blob blob,
             CoreSession session) {
         Lock lock = session.getLockInfo(doc.getRef());
+        if (lockTracker.isWaitingForOffice(doc.getId(), lock)) {
+            // Taken on click, for this very Office session: Office must not find a lock it does not hold the token of.
+            lock = null;
+        }
         String token = lock == null ? null : lockToken(doc.getId(), lock.getOwner());
         return new DavResourceInfo(href(request, target), false, blob.getFilename(), blob.getLength(),
                 mimeTypeOf(blob), timeOf(doc, "dc:modified"), timeOf(doc, "dc:created"), doc.getChangeToken(),

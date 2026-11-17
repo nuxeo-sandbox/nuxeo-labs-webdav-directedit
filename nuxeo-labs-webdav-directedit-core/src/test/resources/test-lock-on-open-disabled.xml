@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<component name="nuxeo.labs.webdavdirectedit.test.lockOnOpenDisabled">
+
+  <documentation>
+    Turns lock-on-open off, to check the plugin then behaves as it did before the feature: clicking does not lock,
+    and the lock follows Office's LOCK and UNLOCK alone.
+  </documentation>
+
+  <require>nuxeo.labs.webdavdirectedit.properties</require>
+
+  <extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">
+    <property name="nuxeo.labs.webdavDirectEdit.lockOnOpen.enabled">false</property>
+  </extension>
+
+</component>

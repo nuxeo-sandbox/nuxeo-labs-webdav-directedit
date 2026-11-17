@@ -27,7 +27,10 @@ Contributors:
   the server reads, so the client and the server can never disagree.
 
   Clicking calls WebDavDirectEdit.GetUrl, which is authoritative: it verifies the xpath really is the
-  document's main blob, that the document is editable, and that the user may write it.
+  document's main blob, that the document is editable, and that the user may write it. Unless lockOnOpen
+  is disabled on the server, it also locks the document; Office releases the lock when the file is closed.
+
+  The button is hidden while the document is locked by another user.
 -->
 <dom-module id="nuxeo-labs-webdav-directedit">
   <template>
@@ -39,7 +42,7 @@ Contributors:
     <nuxeo-operation id="revokeCredentialsOp" op="WebDavDirectEdit.RevokeCredentials"></nuxeo-operation>
 
     <!-- The action button -->
-    <template is="dom-if" if="[[_isAvailable(document, xpath)]]">
+    <template is="dom-if" if="[[_isAvailable(document, user, xpath)]]">
       <div class="action" on-click="_open">
         <paper-icon-button id="directEditBtn" icon="icons:launch" noink aria-labelledby="directEditLabel">
         </paper-icon-button>
@@ -317,12 +320,17 @@ Contributors:
           return '';
         },
 
-        _isAvailable: function(doc, xpath) {
+        _isAvailable: function(doc, user, xpath) {
           if (isFalse(config('enabled', true)) || !doc) {
             return false;
           }
           // Office locks then saves back, so read-only access would only fail after the user made changes.
           if (!this.hasPermission(doc, 'Write') || this.isProxy(doc) || this.isTrashed(doc) || this.isVersion(doc)) {
+            return false;
+          }
+          // Locked by somebody else. Checked on its own because administrators keep Write on a locked document.
+          // The owner may still open it. Without a user, the server makes the call.
+          if (doc.lockOwner && user && user.id && doc.lockOwner !== user.id) {
             return false;
           }
           return !!this._resolveApp(this._blob(doc, xpath));
@@ -366,6 +374,8 @@ Contributors:
             self._showInsecureWarning = !info.secure && !isFalse(config('warnOnInsecureUrl', true));
             self._credentialsHelpEnabled = !isFalse(config('showCredentialsHelp', true));
             self._launch(info.protocolUrl);
+            // The server has just locked the document: reload it so the page shows the lock right away.
+            self.fire('document-updated');
           }).catch(function(error) {
             self._loading = false;
             self._errorMessage = self.i18n('webdavDirectEdit.error.unknown');
@@ -393,7 +403,7 @@ Contributors:
 
         _errorFor: function(info) {
           var key = 'webdavDirectEdit.error.' + (info.reason || 'unknown');
-          var message = this.i18n(key, info.fileName || '');
+          var message = this.i18n(key, info.fileName || '', info.lockOwner || '');
           // i18n returns the key itself when it is unknown, which would be meaningless to the user.
           return message === key ? this.i18n('webdavDirectEdit.error.unknown') : message;
         },

@@ -66,6 +66,10 @@ public interface WebDavDirectEditService {
      * <p>
      * This never throws for a business reason: an unopenable document yields an unavailable {@link DirectEditInfo}
      * carrying an {@link UnavailabilityReason}.
+     * <p>
+     * Not a pure read: when the document can be opened, and unless
+     * {@code nuxeo.labs.webdavDirectEdit.lockOnOpen.enabled} is false, it is locked for the current user, until Office
+     * closes the file (since 2025.3). A lock the user already holds is left as it is.
      *
      * @param doc the document to open
      * @param xpath the blob xpath, {@code null} for the configured default; must designate the document's main blob

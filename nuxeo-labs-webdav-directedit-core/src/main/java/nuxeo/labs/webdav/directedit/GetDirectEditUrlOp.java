@@ -41,9 +41,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 @Operation(id = GetDirectEditUrlOp.ID, category = Constants.CAT_DOCUMENT, label = "WebDAV Direct Edit: Get URL", //
         description = "Returns the WebDAV URL and the ms-word:/ms-excel:/ms-powerpoint: protocol URI allowing the "
                 + "input document to be opened in the matching Microsoft Office desktop application. Returns a JSON "
-                + "blob: {available, app, fileName, davPath, davUrl, protocolUrl, secure, reason}. When available is "
-                + "false, reason tells why: disabled, noBlob, notMainBlob, notOfficeFile, notEditable or "
-                + "noWritePermission.")
+                + "blob: {available, app, fileName, davPath, davUrl, protocolUrl, secure, reason, lockOwner}. When "
+                + "available is false, reason tells why: disabled, noBlob, notMainBlob, notOfficeFile, notEditable, "
+                + "noWritePermission or locked, in which case lockOwner names the user holding the lock. Unless "
+                + "nuxeo.labs.webdavDirectEdit.lockOnOpen.enabled is false, a successful call also locks the "
+                + "document for the current user; the lock is released when Office closes the file.")
 public class GetDirectEditUrlOp {
 
     public static final String ID = "WebDavDirectEdit.GetUrl";
@@ -86,6 +88,7 @@ public class GetDirectEditUrlOp {
         putOrNull(json, "protocolUrl", info.protocolUrl());
         json.put("secure", info.secure());
         putOrNull(json, "reason", info.reason() == null ? null : info.reason().getId());
+        putOrNull(json, "lockOwner", info.lockOwner());
 
         return Blobs.createJSONBlob(json.toString());
     }
