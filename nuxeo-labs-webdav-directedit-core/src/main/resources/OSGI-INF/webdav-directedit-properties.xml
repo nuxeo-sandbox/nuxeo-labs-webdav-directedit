@@ -80,7 +80,7 @@
       Once this window lapses the address still designates its document, but no longer proves who is asking:
       Microsoft Office falls back to a credentials prompt, and the document opens once it is answered. Raise this on
       a demonstration machine to avoid being interrupted; note that on Windows over plain HTTP the prompt cannot be
-      answered at all, see the README.
+      answered at all, see TECHNICAL.md ("Demonstrations and local testing").
     -->
     <property name="nuxeo.labs.webdavDirectEdit.capabilityUrl.ttlMinutes">480</property>
 

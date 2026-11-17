@@ -2,7 +2,7 @@
 
 Nuxeo LTS 2025 plugin: an **Open in Microsoft Office** button in Web UI that opens the document's main blob in
 Word/Excel/PowerPoint over WebDAV; saving from Office updates the document. **Web UI is optional**: the endpoint and
-the Automation ops also serve custom UIs (README "Without Web UI (custom UI)").
+the Automation ops also serve custom UIs (`TECHNICAL.md` "Without Web UI (custom UI)").
 
 It ships **its own WebDAV endpoint** and does **not** use the `nuxeo-webdav` addon, on purpose — see "Why not
 nuxeo-webdav". Do not reintroduce it.
@@ -142,7 +142,7 @@ another user's lock, and `releaseExpired()` honouring records written before the
   are not editing. Whether Office refreshes its WebDAV lock is unmeasured; `doLock` logs a DEBUG line when `If` is set.
 - A `LOCK` that creates the Nuxeo lock (reopened from recent files, after Protected View) is recorded as the plugin's
   own. Office's `UNLOCK` releases at once — **no delay, decided**: Protected View's `UNLOCK` releases the click lock too,
-  and the README says so.
+  and the docs say so (`TECHNICAL.md` "What Protected View costs you", README "Limitations").
 - While `WAITING`, `fileInfo` hides the lock from `lockdiscovery`: before this feature Office never saw a lock before
   its own `LOCK`, and one it holds no token for might make it open read-only. Pinned by
   `shouldHideTheClickLockUntilOfficeLocks`.
@@ -287,8 +287,8 @@ contradict it.
   released after 5–6 min, a lock set by hand is kept, another user does not see the button.
 - Unverified: the Excel/PowerPoint request sequence, Excel's 216-char cap with a long name, older Office, Windows over
   HTTPS, a large document, the Basic fallback with a real client, File › Open, the click lock through Windows
-  Protected View, whether Office refreshes its lock (an idle document past `inactivityTimeoutMinutes`). `README.md`
-  "Validation status" holds the user-facing tables — keep both in sync.
+  Protected View, whether Office refreshes its lock (an idle document past `inactivityTimeoutMinutes`).
+  `TECHNICAL.md` "Validation status" holds the user-facing tables — keep both in sync.
 
 ## A new address per click
 
@@ -306,18 +306,27 @@ all three and give revocation its index — not implemented. If added, keep `iss
 - One DEBUG line per request at the top of `service()` — the only record of which verbs a client sends (no Tomcat
   access log by default).
 - **None of these show with the stock `log4j2.xml`**: Root is `warn` and `nuxeo.labs.webdav.directedit` has no entry
-  (it is not under `org.nuxeo`, itself `warn` anyway). The README ("Reading the log") gives the `<Logger>` line to
-  add. Documented on purpose rather than promoted to WARN: a successful save is not a warning.
+  (it is not under `org.nuxeo`, itself `warn` anyway). `TECHNICAL.md` ("Reading the log") gives the `<Logger>` line
+  to add. Documented on purpose rather than promoted to WARN: a successful save is not a warning.
 
 ## Conventions
 
 - Global Nuxeo rules apply; this repo uses **`@since 2025.3`** on new public API (the current version line; existing
   API keeps its `@since 2025.1`).
 - Log4j2: use all plain args or all `Supplier`s in one call — a lambda cannot bind to the `Object...` overload.
-- Keep `README.md` in step with behaviour changes: it documents config, limits and validation status for users.
+- Keep the docs in step with behaviour changes. They are split on purpose:
+  - `README.md` is short and user-facing: highlights, production checklist, what the user sees, main settings,
+    one-line limitations, troubleshooting (symptom → cause → fix). It summarises and links; keep it short.
+  - `TECHNICAL.md` is the full reference: every property, locking, authentication, Windows/macOS, deployment, logging,
+    Automation ops and custom UI, limitations in detail, validation status. Each fact lives there **once**; elsewhere,
+    link to it.
+  - A new property goes in `TECHNICAL.md` "Configuration" (and in the README "Main settings" only if commonly
+    changed); a new failure mode gets a README "Troubleshooting" row.
+  - The README links into `TECHNICAL.md` by anchor and `TECHNICAL.md` links back to `README.md#when-the-button-appears`:
+    renaming a heading breaks links, so grep both files for the old anchor.
 
 ## This file is public
 
-`AGENTS.md` is committed here (unlike most Nuxeo Labs plugins), **and** `nuxeo-parent` copies root `*.md` into the
-jar as `doc-parent/AGENTS.md`, so it ships inside the MP zip. No credentials, customer data, local paths or real
-document ids.
+`AGENTS.md` is committed here (unlike most Nuxeo Labs plugins), **and** `nuxeo-parent` copies every root `*.md`
+(`AGENTS.md`, `README.md`, `TECHNICAL.md`, and any scratch `.md` left at the root) into the jar under `doc-parent/`, so
+they ship inside the MP zip. No credentials, customer data, local paths or real document ids.
