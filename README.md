@@ -1,16 +1,17 @@
 # Nuxeo Labs WebDAV Direct Edit
 
-Adds an **Open in Microsoft Office** button to the Nuxeo Web UI. One click opens the current document
+Adds an *Open in Microsoft Office* button to the Nuxeo Web UI. One click opens the current document
 in Word, Excel or PowerPoint on the user's desktop. When the user saves from the Office application,
 the changes go straight back to Nuxeo and update the document.
 
-The document is **locked in Nuxeo as soon as the user clicks**, and unlocked when the file is closed in
-Office, the way Nuxeo Drive Direct Edit works. See [Locking](#locking).
+Also:
 
-Works on both macOS and Windows, which support WebDAV natively.
-
-Web UI is optional: the endpoint and the Automation operations work the same behind a custom UI, see
+* The document is locked in Nuxeo as soon as the user clicks, and unlocked when the file is closed in
+Office (same as Nuxeo Drive Direct Edit works. See [Locking](#locking).)
+* Works on both macOS and Windows, which support WebDAV natively.
+* Web UI is optional: the endpoint and the Automation operations work the same behind a custom UI, see
 [Without Web UI (custom UI)](#without-web-ui-custom-ui).
+* The plugin does not use, and does not require, the `nuxeo-webdav` addon.
 
 > [!Important]
 > For Windows User, read the [Platform Notes](#platform-notes)
@@ -26,8 +27,9 @@ Web UI is optional: the endpoint and the Automation operations work the same beh
 The plugin provides its **own WebDAV endpoint**, at `/nuxeo/site/officeedit`. It does not use, and does
 not require, the `nuxeo-webdav` addon.
 
-That endpoint is deliberately **not** a general purpose WebDAV server. It implements only the part of
-RFC 4918 that Microsoft Office exercises, over a URL space that is two levels deep:
+> [!NOTE]
+> That endpoint is deliberately **not** a general purpose WebDAV server. It implements only the part of
+> RFC 4918 that Microsoft Office exercises, over a URL space that is two levels deep:
 
 ```
 /nuxeo/site/officeedit/<sessionToken>/                  a collection holding exactly one file
@@ -90,20 +92,12 @@ nuxeoctl mp-install nuxeo-labs-webdav-directedit-package-<version>.zip
 
 Nothing has to be installed on the user's computer besides Microsoft Office: no Nuxeo Drive, no agent,
 no browser extension, no Java, no mapped drive, and no administrator rights. A browser launches Office
-from the button; a custom UI can launch it by other means, see
-[Without Web UI (custom UI)](#without-web-ui-custom-ui).
+from the button; a custom UI can launch it by other means, see [Without Web UI (custom UI)](#without-web-ui-custom-ui).
 
 The computer must still meet the following conditions.
 
 1. **A licensed Office desktop application that can edit.**
-   - Word, Excel or PowerPoint desktop: Microsoft 365 Apps, or a perpetual Office 2016 or later. Older
-     versions are untested.
-   - Office must be activated. An unlicensed Office runs in *reduced functionality mode*, which opens
-     documents read-only.
-   - Some Microsoft 365 plans, such as Business Basic, E1 or F3, include Office for the web and mobile
-     only, with no desktop application. They cannot be used.
-2. **Windows or macOS.** Linux and ChromeOS have no Office desktop application. Office for the web, iOS
-   and Android are untested and not expected to work.
+2. **Windows or macOS.**
 3. **Direct network access to Nuxeo.** Office connects to the address built from
    `nuxeo.labs.webdavDirectEdit.baseUrl`, else `nuxeo.url`, not to the UI the user clicked in. DNS, VPN
    and firewalls must allow it.
